@@ -1,0 +1,31 @@
+run = "node src/index.js"
+hidden = [".build", ".config"]
+entrypoint = "src/index.js"
+
+[nix]
+channel = "stable-22_11"
+
+[env]
+XDG_CONFIG_HOME = "/home/runner/.config"
+PATH = "/home/runner/$REPL_SLUG/.config/npm/node_global/bin:/home/runner/$REPL_SLUG/node_modules/.bin"
+npm_config_prefix = "/home/runner/$REPL_SLUG/.config/npm/node_global"
+NODE_OPTIONS = "--max-old-space-size=512"
+
+[packager]
+language = "nodejs"
+
+[packager.features]
+enabledForHosting = false
+packageSearch = true
+guessImports = true
+
+[languages.javascript]
+pattern = "**/{*.js,*.jsx,*.ts,*.tsx}"
+syntax = "javascript"
+
+[languages.javascript.languageServer]
+start = [ "typescript-language-server", "--stdio" ]
+
+[deployment]
+run = ["sh", "-c", "node src/index.js"]
+deploymentTarget = "cloudrun" 
