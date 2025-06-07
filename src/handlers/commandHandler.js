@@ -2,7 +2,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const { REST, Routes, Collection } = require('discord.js');
 const config = require('../config/config');
-const logger = require('../utils/logger');
+const { logger } = require('../utils/logger');
 const { PermissionFlagsBits } = require('discord.js');
 
 // Command validation constants

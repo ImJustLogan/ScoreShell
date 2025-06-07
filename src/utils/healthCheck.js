@@ -1,178 +1,137 @@
-const logger = require('./logger');
+const { logger } = require('./logger');
+const mongoose = require('mongoose');
 
 class HealthCheck {
     constructor(client) {
         this.client = client;
-        this.db = client.db;
+        this.isRunning = false;
+        this.interval = null;
         this.lastCheck = null;
-        this.isHealthy = true;
-        this.checkInterval = 30000; // 30 seconds
-        this.retryAttempts = 3;
-        this.retryDelay = 5000; // 5 seconds
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 3;
+        this.reconnectDelay = 5000; // 5 seconds
     }
 
     async start() {
+        if (this.isRunning) {
+            logger.warn('Health check service is already running');
+            return;
+        }
+
         logger.info('Starting health check service...');
-        this.interval = setInterval(() => this.check(), this.checkInterval);
-        await this.check(); // Initial check
+        this.isRunning = true;
+        this.interval = setInterval(() => this.checkHealth(), 30000); // Check every 30 seconds
     }
 
     async stop() {
-        if (this.interval) {
-            clearInterval(this.interval);
-            logger.info('Health check service stopped');
+        if (!this.isRunning) {
+            return;
         }
+
+        logger.info('Stopping health check service...');
+        clearInterval(this.interval);
+        this.isRunning = false;
+        this.interval = null;
     }
 
-    async check() {
+    async checkHealth() {
         try {
-            const startTime = Date.now();
-            const result = await this.db.command({ ping: 1 });
-            const latency = Date.now() - startTime;
-
-            this.lastCheck = {
-                timestamp: new Date(),
-                latency,
+            this.lastCheck = new Date();
+            const results = {
+                timestamp: this.lastCheck,
                 status: 'healthy',
-                details: {
-                    serverStatus: result.ok === 1 ? 'ok' : 'error',
-                    latency: `${latency}ms`
-                }
+                checks: {}
             };
 
-            // Update health status
-            this.isHealthy = true;
-
-            // Log if latency is high
-            if (latency > 1000) {
-                logger.warn(`High database latency: ${latency}ms`);
+            // Check database connection
+            try {
+                const dbStatus = await this.checkDatabaseHealth();
+                results.checks.database = dbStatus;
+            } catch (error) {
+                logger.error('Database health check failed:', error);
+                results.checks.database = {
+                    status: 'unhealthy',
+                    error: error.message
+                };
+                results.status = 'degraded';
             }
 
-            // Store health check result
-            await this.storeHealthCheckResult();
+            // Store health check results
+            await this.storeHealthCheckResult(results);
 
-            return this.lastCheck;
+            return results;
         } catch (error) {
-            this.isHealthy = false;
-            this.lastCheck = {
-                timestamp: new Date(),
-                status: 'unhealthy',
-                error: error.message
-            };
-
-            logger.error('Database health check failed:', error);
-            await this.handleHealthCheckFailure();
-            await this.storeHealthCheckResult();
-
-            return this.lastCheck;
+            logger.error('Health check failed:', error);
+            throw error;
         }
     }
 
-    async storeHealthCheckResult() {
+    async checkDatabaseHealth() {
         try {
-            await this.db.collection('healthChecks').insertOne({
-                ...this.lastCheck,
-                botId: this.client.user.id
-            });
+            // Check if mongoose is connected
+            if (mongoose.connection.readyState !== 1) {
+                throw new Error('Database not connected');
+            }
 
-            // Clean up old health check records (keep last 24 hours)
-            const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
-            await this.db.collection('healthChecks').deleteMany({
-                timestamp: { $lt: cutoff }
+            // Run a simple query to verify connection
+            await mongoose.connection.db.admin().ping();
+            
+            return {
+                status: 'healthy',
+                message: 'Database connection is healthy'
+            };
+        } catch (error) {
+            logger.error('Database health check failed:', error);
+            
+            // Attempt to reconnect
+            await this.attemptReconnect();
+            
+            throw error;
+        }
+    }
+
+    async attemptReconnect() {
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            logger.error('Max reconnection attempts reached');
+            return;
+        }
+
+        this.reconnectAttempts++;
+        logger.info(`Attempting to reconnect to database (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+
+        try {
+            await mongoose.connect(process.env.MONGODB_URI, {
+                useNewUrlParser: true,
+                useUnifiedTopology: true
             });
+            
+            logger.info('Successfully reconnected to database');
+            this.reconnectAttempts = 0;
+        } catch (error) {
+            logger.error(`Reconnection attempt ${this.reconnectAttempts} failed:`, error);
+            
+            // Schedule next attempt
+            setTimeout(() => this.attemptReconnect(), this.reconnectDelay);
+        }
+    }
+
+    async storeHealthCheckResult(result) {
+        try {
+            const collection = mongoose.connection.db.collection('health_checks');
+            await collection.insertOne(result);
         } catch (error) {
             logger.error('Error storing health check result:', error);
         }
     }
 
-    async handleHealthCheckFailure() {
-        for (let attempt = 1; attempt <= this.retryAttempts; attempt++) {
-            try {
-                logger.info(`Attempting to reconnect to database (attempt ${attempt}/${this.retryAttempts})...`);
-                await this.client.connectWithRetry();
-                
-                // Verify connection
-                await this.db.command({ ping: 1 });
-                logger.info('Successfully reconnected to database');
-                this.isHealthy = true;
-                return;
-            } catch (error) {
-                logger.error(`Reconnection attempt ${attempt} failed:`, error);
-                if (attempt < this.retryAttempts) {
-                    await new Promise(resolve => setTimeout(resolve, this.retryDelay));
-                }
-            }
-        }
-
-        // If all retry attempts failed, notify administrators
-        await this.notifyAdministrators();
+    getLastCheck() {
+        return this.lastCheck;
     }
 
-    async notifyAdministrators() {
-        try {
-            const adminChannel = this.client.channels.cache.get(process.env.ADMIN_CHANNEL_ID);
-            if (adminChannel) {
-                await adminChannel.send({
-                    content: '⚠️ **Database Connection Alert**\n' +
-                        'The bot has lost connection to the database and all retry attempts have failed.\n' +
-                        'Please check the database server status and bot logs for more information.'
-                });
-            }
-        } catch (error) {
-            logger.error('Error notifying administrators:', error);
-        }
-    }
-
-    getStatus() {
-        return {
-            isHealthy: this.isHealthy,
-            lastCheck: this.lastCheck,
-            uptime: this.client.uptime,
-            memoryUsage: process.memoryUsage(),
-            commandStats: this.getCommandStats()
-        };
-    }
-
-    async getCommandStats() {
-        try {
-            const stats = await this.db.collection('commandUsage').aggregate([
-                {
-                    $group: {
-                        _id: '$commandName',
-                        totalUses: { $sum: 1 },
-                        successfulUses: {
-                            $sum: { $cond: ['$success', 1, 0] }
-                        },
-                        failedUses: {
-                            $sum: { $cond: ['$success', 0, 1] }
-                        },
-                        lastUsed: { $max: '$timestamp' }
-                    }
-                },
-                {
-                    $project: {
-                        commandName: '$_id',
-                        totalUses: 1,
-                        successfulUses: 1,
-                        failedUses: 1,
-                        successRate: {
-                            $multiply: [
-                                { $divide: ['$successfulUses', '$totalUses'] },
-                                100
-                            ]
-                        },
-                        lastUsed: 1,
-                        _id: 0
-                    }
-                }
-            ]).toArray();
-
-            return stats;
-        } catch (error) {
-            logger.error('Error getting command stats:', error);
-            return [];
-        }
+    isServiceRunning() {
+        return this.isRunning;
     }
 }
 
+module.exports = HealthCheck; 
 module.exports = HealthCheck; 

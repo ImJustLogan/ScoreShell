@@ -105,8 +105,8 @@ async function initializeDatabase() {
         mongoClient = await connectWithRetry(process.env.MONGODB_URI, dbOptions);
         client.db = mongoClient.db();
         
-        // Set up database error handling
-        client.db.on('error', async (error) => {
+        // Set up database error handling on the client instance
+        mongoClient.on('error', async (error) => {
             logger.error('Database error:', error);
             if (error.name === 'MongoNetworkError') {
                 try {
@@ -120,6 +120,16 @@ async function initializeDatabase() {
                 }
             }
         });
+
+        // Add connection event listeners
+        mongoClient.on('connected', () => {
+            logger.info('MongoDB connected');
+        });
+
+        mongoClient.on('disconnected', () => {
+            logger.warn('MongoDB disconnected');
+        });
+
         return mongoClient;
     } catch (error) {
         logger.error('Fatal database connection error:', error);
