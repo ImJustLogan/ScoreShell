@@ -91,29 +91,32 @@ async function connectWithRetry(uri, options, maxRetries = 5, retryDelay = 5000)
 }
 
 // Initialize database connection
-let mongoClient;
-try {
-    mongoClient = await connectWithRetry(process.env.MONGODB_URI, dbOptions);
-    client.db = mongoClient.db();
-    
-    // Set up database error handling
-    client.db.on('error', async (error) => {
-        logger.error('Database error:', error);
-        if (error.name === 'MongoNetworkError') {
-            try {
-                await mongoClient.close();
-                mongoClient = await connectWithRetry(process.env.MONGODB_URI, dbOptions);
-                client.db = mongoClient.db();
-                logger.info('Database connection recovered');
-            } catch (retryError) {
-                logger.error('Failed to recover database connection:', retryError);
-                process.exit(1);
+async function initializeDatabase() {
+    let mongoClient;
+    try {
+        mongoClient = await connectWithRetry(process.env.MONGODB_URI, dbOptions);
+        client.db = mongoClient.db();
+        
+        // Set up database error handling
+        client.db.on('error', async (error) => {
+            logger.error('Database error:', error);
+            if (error.name === 'MongoNetworkError') {
+                try {
+                    await mongoClient.close();
+                    mongoClient = await connectWithRetry(process.env.MONGODB_URI, dbOptions);
+                    client.db = mongoClient.db();
+                    logger.info('Database connection recovered');
+                } catch (retryError) {
+                    logger.error('Failed to recover database connection:', retryError);
+                    process.exit(1);
+                }
             }
-        }
-    });
-} catch (error) {
-    logger.error('Fatal database connection error:', error);
-    process.exit(1);
+        });
+        return mongoClient;
+    } catch (error) {
+        logger.error('Fatal database connection error:', error);
+        process.exit(1);
+    }
 }
 
 // Handle uncaught exceptions
@@ -184,8 +187,8 @@ async function startBot() {
         const healthCheck = new HealthCheck(client);
         client.healthCheck = healthCheck;
 
-        // Connect to database with retry logic
-        await connectWithRetry();
+        // Initialize database
+        mongoClient = await initializeDatabase();
 
         // Start health check service
         await healthCheck.start();
