@@ -1,6 +1,5 @@
 const winston = require('winston');
 const path = require('path');
-const config = require('../config/config');
 
 // Define log levels
 const levels = {
@@ -32,34 +31,25 @@ const format = winston.format.combine(
     ),
 );
 
-// Define which transports the logger must use
-const transports = [
-    // Console transport for all logs
-    new winston.transports.Console(),
-    
-    // File transport for error logs
-    new winston.transports.File({
-        filename: path.join('logs', 'error.log'),
-        level: 'error',
-        maxsize: 5242880, // 5MB
-        maxFiles: 5,
-    }),
-    
-    // File transport for all logs
-    new winston.transports.File({
-        filename: path.join('logs', 'combined.log'),
-        maxsize: 5242880, // 5MB
-        maxFiles: 5,
-    }),
-];
-
-// Create the logger instance
+// Create a basic logger instance
 const logger = winston.createLogger({
-    level: config.logLevel || 'info',
+    level: 'info', // Default level
     levels,
     format,
-    transports,
-    // Handle uncaught exceptions and rejections
+    transports: [
+        new winston.transports.Console(),
+        new winston.transports.File({
+            filename: path.join('logs', 'error.log'),
+            level: 'error',
+            maxsize: 5242880, // 5MB
+            maxFiles: 5,
+        }),
+        new winston.transports.File({
+            filename: path.join('logs', 'combined.log'),
+            maxsize: 5242880, // 5MB
+            maxFiles: 5,
+        }),
+    ],
     exceptionHandlers: [
         new winston.transports.File({
             filename: path.join('logs', 'exceptions.log'),
@@ -75,6 +65,13 @@ const logger = winston.createLogger({
         }),
     ],
 });
+
+// Function to update logger with config
+function updateLoggerWithConfig(config) {
+    if (config.logLevel) {
+        logger.level = config.logLevel;
+    }
+}
 
 // Create a stream object for Morgan middleware
 logger.stream = {
@@ -116,4 +113,7 @@ logger.moderation = (action, moderator, target, reason) => {
     logger.warn(`Moderation: ${action} by ${moderator} on ${target}`, { reason });
 };
 
-module.exports = logger; 
+module.exports = {
+    logger,
+    updateLoggerWithConfig
+}; 

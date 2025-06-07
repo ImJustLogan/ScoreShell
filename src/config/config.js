@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const logger = require('../utils/logger');
+const { logger, updateLoggerWithConfig } = require('../utils/logger');
 
 // Configuration validation helpers
 const validators = {
@@ -422,38 +422,59 @@ function validateRanks(ranks) {
 // Load configuration
 function loadConfig() {
     try {
+        console.log('Starting config load...');
+        console.log('Checking environment variables...');
+        
+        // Log which env vars are present (without showing values)
+        const requiredVars = ['DISCORD_TOKEN', 'CLIENT_ID', 'OWNER_ID', 'MONGODB_URI'];
+        requiredVars.forEach(varName => {
+            console.log(`${varName} is ${process.env[varName] ? 'present' : 'missing'}`);
+        });
+
         // Validate environment variables
-        validateEnvironment();
-
-        // Get environment-specific config
-        const env = process.env.NODE_ENV || 'development';
-        const envSettings = envConfig[env] || envConfig.development;
-
-        // Merge configurations
+        console.log('Validating environment variables...');
+        validateEnvVars();
+        
+        // Set defaults for optional variables
+        console.log('Setting defaults for optional variables...');
+        setDefaults();
+        
+        // Create config object
+        console.log('Creating config object...');
         const config = {
-            ...baseConfig,
-            ...envSettings,
-            mongodb: {
-                ...baseConfig.mongodb,
-                options: {
-                    ...baseConfig.mongodb.options,
-                    ...envSettings.database
-                }
-            }
+            // Environment
+            env: process.env.NODE_ENV || 'development',
+            port: parseInt(process.env.PORT) || 3000,
+            
+            // Discord
+            token: process.env.DISCORD_TOKEN,
+            clientId: process.env.CLIENT_ID,
+            ownerId: process.env.OWNER_ID,
+            guildId: process.env.GUILD_ID,
+            
+            // Database
+            mongodbUri: process.env.MONGODB_URI,
+            
+            // Logging
+            logLevel: process.env.LOG_LEVEL || 'info',
         };
 
-        // Validate rank configuration
-        validateRanks(config.ranks);
-
-        // Log configuration load
-        logger.info(`Loaded configuration for ${env} environment`);
+        // Update logger with config
+        console.log('Updating logger with config...');
+        updateLoggerWithConfig(config);
+        
+        console.log('Config loaded successfully');
         return config;
     } catch (error) {
-        logger.error('Error loading configuration:', error);
-        throw error;
+        console.error('Error loading configuration:', error);
+        console.error('Error details:', {
+            name: error.name,
+            message: error.message,
+            stack: error.stack
+        });
+        process.exit(1);
     }
 }
 
-// Export configuration
-const config = loadConfig();
-module.exports = config; 
+// Export the configuration
+module.exports = loadConfig(); 

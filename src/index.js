@@ -1,7 +1,15 @@
 require('dotenv').config();
+console.log('Starting ScoreShell bot...');
+
 const { Client, GatewayIntentBits, Collection, ActivityType } = require('discord.js');
+console.log('Discord.js imported successfully');
+
 const { MongoClient, ServerApiVersion } = require('mongodb');
-const logger = require('./utils/logger');
+console.log('MongoDB imported successfully');
+
+const { logger } = require('./utils/logger');
+console.log('Logger initialized');
+
 const { registerCommonEvents, loadEvents } = require('./handlers/eventHandler');
 const { loadCommands } = require('./handlers/commandHandler');
 const TaskManager = require('./utils/taskManager');
@@ -182,56 +190,69 @@ process.on('SIGTERM', async () => {
 
 // Initialize and start the bot
 async function startBot() {
+    console.log('Starting bot initialization...');
     try {
         // Initialize health check
+        console.log('Initializing health check...');
         const healthCheck = new HealthCheck(client);
         client.healthCheck = healthCheck;
 
         // Initialize database
+        console.log('Connecting to database...');
         mongoClient = await initializeDatabase();
+        console.log('Database connected successfully');
 
         // Start health check service
+        console.log('Starting health check service...');
         await healthCheck.start();
 
         // Load commands
+        console.log('Loading commands...');
         try {
             await loadCommands(client);
             logger.info('Commands loaded');
         } catch (error) {
+            console.error('Failed to load commands:', error);
             logger.error('Failed to load commands:', error);
             if (error.message.includes('CLIENT_ID')) {
-                logger.error('Please set the CLIENT_ID environment variable in your .env file or Replit Secrets');
+                console.error('Please set the CLIENT_ID environment variable in your .env file');
+                logger.error('Please set the CLIENT_ID environment variable in your .env file');
                 process.exit(1);
             }
-            // Continue startup even if command loading fails
-            // This allows the bot to start and we can fix commands later
         }
 
         // Load events
+        console.log('Loading events...');
         await loadEvents(client);
         logger.info('Events loaded');
 
         // Initialize task manager
+        console.log('Initializing task manager...');
         client.taskManager = new TaskManager(client.db);
         await client.taskManager.initialize();
         logger.info('Task manager initialized');
 
         // Initialize challenge manager
+        console.log('Initializing challenge manager...');
         client.challengeManager = new ChallengeManager(client.db);
         logger.info('Challenge manager initialized');
 
         // Register common event handlers
+        console.log('Registering common events...');
         registerCommonEvents(client);
 
         // Start queue display updates
+        console.log('Starting queue display updates...');
         startQueueDisplayUpdates(client);
         logger.info('Queue display updates started');
 
         // Start matchmaking service
+        console.log('Starting matchmaking service...');
         startMatchmakingService(client);
         logger.info('Matchmaking service started');
 
         // Login to Discord
+        console.log('Logging in to Discord...');
         await client.login(process.env.DISCORD_TOKEN);
         logger.info('Bot is ready!');
 
